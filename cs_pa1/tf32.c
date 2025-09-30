@@ -9,7 +9,7 @@
     if neccessary, you can add some macros below
 */
 
-// TF32 형식: 19비트 (1 부호 + 8 지수 + 10 가수)
+// TF32 형식 지정
 #define TF32_SIGN_MASK    0x40000u
 #define TF32_EXP_MASK     0x3FC00u
 #define TF32_FRAC_MASK    0x003FFu
@@ -17,18 +17,19 @@
 #define TF32_EXP_SHIFT    10
 #define TF32_FRAC_BITS    10
 
+// 32비트 정수를 tf32 정규, 비정규, 0, 특수 값으로 변환하는 함수
 tf32 int2tf32(int in) {
-    if (in == 0) {
+    if (in == 0) { // 입력 값이 0인 경우 그대로 0을 반환
         return 0;
     }
     
     unsigned int sign = 0;
     unsigned int abs_val;
     
-    // 부호 처리
+    // 부호와 절대값 분리
     if (in < 0) {
         sign = 1;
-        if (in == 0x80000000) {  // INT_MIN
+        if (in == 0x80000000) {
             abs_val = 0x80000000u;
         } else {
             abs_val = (unsigned int)(-in);
@@ -37,7 +38,9 @@ tf32 int2tf32(int in) {
         abs_val = (unsigned int)in;
     }
     
-    // 최상위 비트 찾기
+    // 최상위 비트를 탐색
+    // leading_bit: 최상위 비트의 위치
+    // abs_val == 0 이면 0을 반환
     int leading_bit = 31;
     while (leading_bit >= 0 && !((abs_val >> leading_bit) & 1)) {
         leading_bit--;
@@ -50,19 +53,19 @@ tf32 int2tf32(int in) {
     // 지수 계산
     int exp = leading_bit + TF32_EXP_BIAS;
     
-    // 가수 추출
+    // 가수 구하기 및 반올림
     unsigned int frac;
-    if (leading_bit >= TF32_FRAC_BITS) {
+    if (leading_bit >= TF32_FRAC_BITS) { // 
         int shift = leading_bit - TF32_FRAC_BITS;
         frac = (abs_val >> shift) & TF32_FRAC_MASK;
-        
-        // Round to even
+
+        // 반올림 처리
         if (shift > 0) {
             unsigned int remainder = abs_val & ((1u << shift) - 1);
             unsigned int half = 1u << (shift - 1);
             if (remainder > half || (remainder == half && (frac & 1))) {
                 frac++;
-                if (frac > TF32_FRAC_MASK) {
+                if (frac > TF32_FRAC_MASK) { // 가수 오버플로우
                     frac = 0;
                     exp++;
                 }
@@ -72,35 +75,39 @@ tf32 int2tf32(int in) {
         frac = (abs_val << (TF32_FRAC_BITS - leading_bit)) & TF32_FRAC_MASK;
     }
     
+    // 19비트로 패킹
     return (sign << 18) | (exp << TF32_EXP_SHIFT) | frac;
 }
 
+// tf32를 가장 근접한 정수로 변환하는 함수
 int tf322int(tf32 in) {
     unsigned int sign = (in >> 18) & 1;
     unsigned int exp = (in >> TF32_EXP_SHIFT) & 0xFF;
     unsigned int frac = in & TF32_FRAC_MASK;
     
-    // 특수값
+    // 특수값 처리
     if (exp == 0xFF) {
         return (frac == 0) ? (sign ? 0x80000000 : 0x7FFFFFFF) : 0x80000000;
     }
     
     if (exp == 0) {
-        return 0;  // ±0 또는 비정규화 수 (모두 0으로 변환)
+        return 0;  // 0 또는 비정규화
     }
     
-    // 정규화된 수
+
     int true_exp = (int)exp - TF32_EXP_BIAS;
     
     if (true_exp < 0) {
         return 0;
     }
     
+    // 가수 구하기
     unsigned int mantissa = (1u << TF32_FRAC_BITS) | frac;
     unsigned int result_uint;
     
+    // 시프트 후 반올림 처리
     if (true_exp >= TF32_FRAC_BITS) {
-        if (true_exp - TF32_FRAC_BITS > 21) {
+        if (true_exp - TF32_FRAC_BITS > 21) { // 32비트 보호
             return sign ? 0x80000000 : 0x7FFFFFFF;
         }
         result_uint = mantissa << (true_exp - TF32_FRAC_BITS);
@@ -115,25 +122,26 @@ int tf322int(tf32 in) {
         }
     }
     
-    // 부호 적용 및 범위 체크
+    // 부호 적용 후 범위를 넘는 값 처리
     if (sign == 0) {
-        // 양수: INT_MAX 초과 체크
+        // 양의 범위를 넘을 경우 TMax 반환
         if (result_uint > 0x7FFFFFFFu) {
-            return 0x7FFFFFFF;  // TMax
+            return 0x7FFFFFFF;
         }
         return (int)result_uint;
     } else {
-        // 음수: INT_MIN 체크
+        // 음의 범위를 넘을 경우 TMin 반환
         if (result_uint > 0x80000000u) {
-            return 0x80000000;  // TMin
+            return 0x80000000;
         }
         if (result_uint == 0x80000000u) {
-            return (int)0x80000000;  // INT_MIN
+            return (int)0x80000000;
         }
         return -(int)result_uint;
     }
 }
 
+// double을 tf32로 변환하는 함수
 tf32 double2tf32(double in) {
     union { double f; unsigned long long u; } x;
     x.f = in;
@@ -143,55 +151,55 @@ tf32 double2tf32(double in) {
     unsigned long long exp = (bits >> 52) & 0x7FF;
     unsigned long long frac = bits & 0xFFFFFFFFFFFFFull;
     
-    // 특수값
+    // 특수값 처리
     if (exp == 0x7FF) {
         if (frac == 0) {
-            return (sign << 18) | 0x3FC00;  // ±Inf
+            return (sign << 18) | 0x3FC00; // 무한 수 처리
         } else {
-            return 0x3FE00;  // NaN (quiet NaN: exp=0xFF, frac=0x200)
+            return 0x3FE00; // NaN 처리
         }
     }
     
     if (exp == 0 && frac == 0) {
-        return sign << 18;  // ±0
+        return sign << 18;  // +-0 처리
     }
     
-    // 정규화
+    // 정규화 과정
     int double_exp;
+
     if (exp == 0) {
         // 비정규화된 수
         double_exp = 1 - 1023;
-        while ((frac & 0x10000000000000ull) == 0) {
+        while ((frac & 0x10000000000000ull) == 0) { // hidden bit 1 처리
             frac <<= 1;
             double_exp--;
         }
-        frac &= 0xFFFFFFFFFFFFFull;
+        frac &= 0xFFFFFFFFFFFFFull; // hidden bit 1 제거
     } else {
         double_exp = (int)exp - 1023;
     }
     
-    // TF32 지수로 변환
+    // tf32 지수
     int tf32_exp = double_exp + TF32_EXP_BIAS;
     
-    // 오버플로우
+    // 오버플로우 발생할 경우 Inf 반환
     if (tf32_exp >= 0xFF) {
         return (sign << 18) | 0x3FC00;
     }
     
-    // 언더플로우 - 비정규화
+    // 언더플로우, 비정규화 처리
     if (tf32_exp <= 0) {
         if (tf32_exp < -TF32_FRAC_BITS) {
-            return sign << 18;  // 0으로 언더플로우
+            return sign << 18;  // 언더플로우 발생할 경우 0 반환
         }
         
-        // 비정규화된 수 생성
         unsigned long long tf32_frac = frac >> (52 - TF32_FRAC_BITS);
-        tf32_frac |= 0x400;  // 암시적 1 추가
+        tf32_frac |= 0x400;  // hidden 1 보정
         
-        int shift_amount = 1 - tf32_exp;
+        int shift_amount = 1 - tf32_exp; // exp == 0 이 되도록
         tf32_frac >>= shift_amount;
         
-        // Round to even
+        // 반올림 처리
         int total_shift = shift_amount + (52 - TF32_FRAC_BITS);
         if (total_shift < 52) {
             unsigned long long remainder = frac & ((1ull << total_shift) - 1);
@@ -204,16 +212,16 @@ tf32 double2tf32(double in) {
         return (sign << 18) | (tf32_frac & TF32_FRAC_MASK);
     }
     
-    // 정규화된 수
+    // 정규화된 수 처리
     int shift = 52 - TF32_FRAC_BITS;
     unsigned long long tf32_frac = frac >> shift;
     unsigned long long remainder = frac & ((1ull << shift) - 1);
     
-    // Round to even
+    // 반올림 처리  
     unsigned long long half = 1ull << (shift - 1);
     if (remainder > half || (remainder == half && (tf32_frac & 1))) {
         tf32_frac++;
-        if (tf32_frac > TF32_FRAC_MASK) {
+        if (tf32_frac > TF32_FRAC_MASK) { // 가수 오버플로우가 발생할 경우 지수에 1을 더함
             tf32_frac = 0;
             tf32_exp++;
             if (tf32_exp >= 0xFF) {
@@ -225,59 +233,8 @@ tf32 double2tf32(double in) {
     return (sign << 18) | (tf32_exp << TF32_EXP_SHIFT) | tf32_frac;
 }
 
-// 내부 계산용: 정확한 비정규화 수 변환
-static double tf322double_accurate(tf32 in) {
-    unsigned int sign = (in >> 18) & 1;
-    unsigned int exp = (in >> TF32_EXP_SHIFT) & 0xFF;
-    unsigned int frac = in & TF32_FRAC_MASK;
-    
-    union { double f; unsigned long long u; } result;
-    
-    if (exp == 0xFF) {
-        if (frac == 0) {
-            result.u = ((unsigned long long)sign << 63) | 0x7FF0000000000000ull;
-        } else {
-            result.u = 0x7FF8000000000000ull;
-        }
-        return result.f;
-    }
-    
-    if (exp == 0) {
-        if (frac == 0) {
-            result.u = (unsigned long long)sign << 63;
-            return result.f;
-        }
-        
-        // 비정규화 수 - 정확한 변환
-        int shift_count = 0;
-        unsigned int temp = frac;
-        while ((temp & 0x400) == 0) {
-            temp <<= 1;
-            shift_count++;
-        }
-        
-        int double_exp = (-126 - shift_count) + 1023;
-        unsigned long long double_frac = ((unsigned long long)(temp & 0x3FF)) << (52 - 10);
-        
-        result.u = ((unsigned long long)sign << 63) | 
-                  ((unsigned long long)double_exp << 52) | 
-                  double_frac;
-        return result.f;
-    }
-    
-    int true_exp = (int)exp - TF32_EXP_BIAS;
-    int double_exp = true_exp + 1023;
-    
-    unsigned long long double_frac = (unsigned long long)frac << (52 - TF32_FRAC_BITS);
-    
-    result.u = ((unsigned long long)sign << 63) | 
-              ((unsigned long long)double_exp << 52) | 
-              double_frac;
-    
-    return result.f;
-}
 
-// 외부용: 과제 스펙에 맞는 변환
+// tf32를 double로 변환하는 함수
 double tf322double(tf32 in) {
     unsigned int sign = (in >> 18) & 1;
     unsigned int exp = (in >> TF32_EXP_SHIFT) & 0xFF;
@@ -285,6 +242,7 @@ double tf322double(tf32 in) {
     
     union { double f; unsigned long long u; } result;
     
+    // 특수값 처리
     if (exp == 0xFF) {
         if (frac == 0) {
             result.u = ((unsigned long long)sign << 63) | 0x7FF0000000000000ull;
@@ -299,17 +257,16 @@ double tf322double(tf32 in) {
             result.u = (unsigned long long)sign << 63;
             return result.f;
         }
-        
-        // 비정규화 수 - 과제 스펙: 2^-126으로 매핑
+        // 비정규화 수 처리
         result.u = ((unsigned long long)sign << 63) | (897ull << 52);
         return result.f;
     }
     
+    // 정규화 과정 처리
     int true_exp = (int)exp - TF32_EXP_BIAS;
     int double_exp = true_exp + 1023;
     
     unsigned long long double_frac = (unsigned long long)frac << (52 - TF32_FRAC_BITS);
-    
     result.u = ((unsigned long long)sign << 63) | 
               ((unsigned long long)double_exp << 52) | 
               double_frac;
