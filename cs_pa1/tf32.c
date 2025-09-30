@@ -97,33 +97,40 @@ int tf322int(tf32 in) {
     }
     
     unsigned int mantissa = (1u << TF32_FRAC_BITS) | frac;
-    int result_int;
+    unsigned int result_uint;
     
     if (true_exp >= TF32_FRAC_BITS) {
         if (true_exp - TF32_FRAC_BITS > 21) {
             return sign ? 0x80000000 : 0x7FFFFFFF;
         }
-        result_int = mantissa << (true_exp - TF32_FRAC_BITS);
+        result_uint = mantissa << (true_exp - TF32_FRAC_BITS);
     } else {
         int shift = TF32_FRAC_BITS - true_exp;
         unsigned int remainder = mantissa & ((1u << shift) - 1);
-        result_int = mantissa >> shift;
+        result_uint = mantissa >> shift;
         
         unsigned int half = 1u << (shift - 1);
-        if (remainder > half || (remainder == half && (result_int & 1))) {
-            result_int++;
+        if (remainder > half || (remainder == half && (result_uint & 1))) {
+            result_uint++;
         }
     }
     
-    // 부호 적용
+    // 부호 적용 및 범위 체크
     if (sign == 0) {
-        return result_int;
-    } else {
-        // 음수 처리: INT_MIN 특수 케이스
-        if (result_int > 0x80000000u) {
-            return 0x80000000;  // INT_MIN
+        // 양수: INT_MAX 초과 체크
+        if (result_uint > 0x7FFFFFFFu) {
+            return 0x7FFFFFFF;  // TMax
         }
-        return -result_int;
+        return (int)result_uint;
+    } else {
+        // 음수: INT_MIN 체크
+        if (result_uint > 0x80000000u) {
+            return 0x80000000;  // TMin
+        }
+        if (result_uint == 0x80000000u) {
+            return (int)0x80000000;  // INT_MIN
+        }
+        return -(int)result_uint;
     }
 }
 
