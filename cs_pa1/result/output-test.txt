@@ -1,6 +1,6 @@
 int2tf32(37) = 0x210a0
-tf322int(0x1fa00) = 0
-double2tf32(-2025.500000) = 0x627ea
+tf322int(0x1f800) = 0
+double2tf32(0.500000) = 0x1f800
 tf322double(0x20f29) = 28.640625 (0x403ca40000000000)
 tf32_add(0x21f45, 0x20ce8) = 0x21f93
 tf32_mul(0x42714, 0x24f2a) = 0x47a57

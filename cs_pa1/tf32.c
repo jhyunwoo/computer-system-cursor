@@ -112,13 +112,13 @@ int tf322int(tf32 in) {
         return 0;
     }
     
-    // 실제 지수(true exponent) 계산: 바이어스(127)를 뺌
-    int true_exp = (int)exp - TF32_EXP_BIAS;
-    
-    // 실제 지수가 0보다 작으면 값은 1보다 작으므로 정수 0으로 반환
-    if (true_exp < 0) {
-        return 0;
-    }
+    // 실제 지수(true exponent) 계산: 바이어스(127)를 뺌
+    int true_exp = (int)exp - TF32_EXP_BIAS;
+    
+    // 실제 지수가 -1보다 작으면 값은 0.5보다 작으므로 정수 0으로 반올림
+    if (true_exp < -1) {
+        return 0;
+    }
     
     // 가수(mantissa) 복원: 정규화된 수는 암시적인 1이 맨 앞에 있으므로 이를 추가
     unsigned int mantissa = (1u << TF32_FRAC_BITS) | frac;
